@@ -1,12 +1,27 @@
-FROM node:20-alpine3.21
+FROM node:22-alpine AS base
 
-USER node
-WORKDIR /home/node
+FROM base AS builder
 
-COPY . .
-RUN npm ci
+RUN apk add --no-cache gcompat
+WORKDIR /app
 
-ARG PORT
-EXPOSE ${PORT:-3000}
+COPY package*json tsconfig.json src ./
 
-CMD ["npm", "run", "start"]
+RUN npm ci && \
+    npm run build && \
+    npm prune --production
+
+FROM base AS runner
+WORKDIR /app
+
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 hono
+
+COPY --from=builder --chown=hono:nodejs /app/node_modules /app/node_modules
+COPY --from=builder --chown=hono:nodejs /app/dist /app/dist
+COPY --from=builder --chown=hono:nodejs /app/package.json /app/package.json
+
+USER hono
+EXPOSE 3000
+
+CMD ["node", "/app/dist/index.js"]
